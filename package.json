@@ -1,11 +1,17 @@
 {
-  "name": "multiple-agent-session",
+  "name": "mas-term",
   "version": "0.1.0",
   "description": "Run several coding-agent sessions (Claude Code, Codex, Gemini, shells) side by side in one terminal, with a sidebar to switch between them.",
   "type": "module",
   "bin": {
     "mas": "bin/mas.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "examples/"
+  ],
   "scripts": {
     "start": "node bin/mas.js",
     "postinstall": "node scripts/fix-pty-permissions.js"
@@ -13,6 +19,22 @@
   "engines": {
     "node": ">=18"
   },
+  "keywords": [
+    "terminal",
+    "tui",
+    "multiplexer",
+    "claude",
+    "codex",
+    "gemini",
+    "agents",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gianargamosa/mastodon.git"
+  },
+  "homepage": "https://github.com/gianargamosa/mastodon#readme",
+  "bugs": "https://github.com/gianargamosa/mastodon/issues",
   "license": "MIT",
   "dependencies": {
     "@xterm/headless": "^6.0.0",

@@ -28,14 +28,14 @@ You need:
 - whichever agent CLIs you want to run (`claude`, `codex`, `gemini`); anything
   else on your PATH works too
 
-From the project folder:
-
 ```sh
-npm install              # installs dependencies (and fixes node-pty's spawn helper)
-npm link                 # puts `mas` on your PATH
+npm i -g mas-term        # puts `mas` on your PATH
 mas --install-shortcuts  # adds mas:claude, mas:codex, mas:gemini, mas:shell
 mas --help               # check it's installed
 ```
+
+Or from a clone of this repo: `npm install`, then `npm link` instead of the
+first line.
 
 `--install-shortcuts` links one `mas:<agent>` per configured agent next to `mas`.
 (npm can’t do this itself: it would install a `mas:claude` bin as plain `claude`
@@ -45,7 +45,8 @@ the shortcuts somewhere else, pass a folder: `mas --install-shortcuts ~/bin`.
 To try it without installing anything globally, run `npm start` (same as
 `node bin/mas.js`) from the project folder.
 
-To uninstall, run `npm unlink -g multiple-agent-session` and delete the
+To uninstall, run `npm uninstall -g mas-term` (or `npm unlink -g mas-term` for
+a linked clone) and delete the
 `mas:<agent>` links it made next to `mas`.
 
 ## Use
