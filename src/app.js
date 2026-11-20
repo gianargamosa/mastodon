@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { expandHome, resolveAgent, shellCommand, tildify } from './config.js';
@@ -37,6 +38,12 @@ const KEYS = {
   scrollDown: ['\x1b[6;2~'], // Shift+PageDown
 };
 const is = (key, name) => KEYS[name].includes(key);
+// The system clipboard tool to try alongside OSC 52, which not every terminal
+// honours (Terminal.app ignores it; iTerm2 asks first).
+const CLIPBOARD = {
+  darwin: ['pbcopy'],
+  linux: process.env.WAYLAND_DISPLAY ? ['wl-copy'] : ['xclip', '-selection', 'clipboard'],
+}[process.platform];
 
 export class App {
   // `tab` is this mas's name from --tab ('' for the default one).
@@ -49,6 +56,7 @@ export class App {
     this.focus = 'sidebar'; // 'sidebar' | 'pane'
     this.modal = null; // new-session dialog
     this.confirm = null; // { message, onYes }
+    this.selection = null; // { session, anchor, head, dragging }, rows counted from the top of the buffer
     this.lastDir = process.cwd();
     this.nextId = 1;
     this.drawn = { side: [], pane: [] };
@@ -82,7 +90,8 @@ export class App {
     stdin.on('data', (data) => this.onInput(data));
     stdin.resume();
     stdout.on('resize', () => this.onResize());
-    stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[?1000h\x1b[?1006h');
+    // 1002 reports drags as well as clicks, for selecting text in the pane.
+    stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[?1002h\x1b[?1006h');
 
     process.on('exit', () => this.restoreTerminal());
     for (const signal of ['SIGTERM', 'SIGHUP']) process.on(signal, () => this.quit());
@@ -105,7 +114,7 @@ export class App {
   restoreTerminal() {
     if (this.restored) return;
     this.restored = true;
-    process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?1l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l');
+    process.stdout.write('\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l');
   }
 
   quit() {
@@ -238,6 +247,7 @@ export class App {
       this.scheduleRender();
       if (!data) return;
     }
+    this.selection = null;
     if (this.confirm) {
       const { onYes, onKey } = this.confirm;
       this.confirm = null;
@@ -278,10 +288,25 @@ export class App {
   // `x` and `y` are 1-based screen cells. The wheel scrolls the pane's
   // scrollback, unless the program there handles the mouse itself or is
   // full-screen (vim, less…), which gets arrow keys the way a terminal would.
+  // Dragging selects text in the pane and copies it, unless the program
+  // handles the mouse itself.
   onMouse(button, x, y, release) {
     if (this.modal || this.confirm) return;
     const wheel = button & 64 ? (button & 1 ? 1 : -1) : 0; // 1 down, -1 up
-    const press = !wheel && !release && (button & 3) === 0;
+    const motion = Boolean(button & 32);
+    const left = !wheel && (button & 3) === 0;
+    const press = left && !motion && !release;
+
+    // A drag keeps selecting even when it strays over the sidebar.
+    if (this.selection?.dragging && !wheel) {
+      if (left && (motion || release)) this.dragSelection(x, y, release);
+      return;
+    }
+    if (motion) {
+      const session = this.active;
+      const mode = session?.term.modes.mouseTrackingMode;
+      if (x <= SIDEBAR_WIDTH || !session?.pty || (mode !== 'drag' && mode !== 'any')) return;
+    }
 
     if (x <= SIDEBAR_WIDTH) {
       if (wheel) return this.activate(this.activeIndex + wheel);
@@ -313,6 +338,11 @@ export class App {
       }
       return;
     }
+    if (press) {
+      const at = this.paneCell(session, x, y);
+      this.selection = { session, anchor: at, head: at, dragging: true };
+      return;
+    }
     if (!wheel) return;
     if (term.buffer.active.type === 'alternate') {
       if (!session.pty) return;
@@ -321,6 +351,74 @@ export class App {
       return;
     }
     session.scroll(-wheel * WHEEL_LINES);
+  }
+
+  // The pane cell under screen cell (x, y), as a column and a buffer row, so a
+  // selection stays on its text while the pane scrolls.
+  paneCell(session, x, y) {
+    const { cols, rows } = this.paneSize;
+    const col = Math.max(0, Math.min(cols - 1, x - SIDEBAR_WIDTH - 1));
+    const row = Math.max(0, Math.min(rows - 1, y - 1));
+    return { col, row: session.term.buffer.active.baseY - session.scrollOffset + row };
+  }
+
+  dragSelection(x, y, release) {
+    const selection = this.selection;
+    selection.head = this.paneCell(selection.session, x, y);
+    if (!release) return;
+    selection.dragging = false;
+    const { anchor, head } = selection;
+    if (anchor.row === head.row && anchor.col === head.col) {
+      this.selection = null; // a plain click
+      return;
+    }
+    const text = this.selectedText();
+    if (text) {
+      this.copy(text);
+      this.flash = `Copied ${[...text].length} characters`;
+    }
+  }
+
+  // The selection's start and end in reading order, or null if it isn't on
+  // the active session.
+  selectionRange() {
+    const selection = this.selection;
+    if (!selection || selection.session !== this.active) return null;
+    const { anchor, head } = selection;
+    const forward = anchor.row < head.row || (anchor.row === head.row && anchor.col <= head.col);
+    return forward ? { start: anchor, end: head } : { start: head, end: anchor };
+  }
+
+  // The selected text, with lines the program wrapped joined back up.
+  selectedText() {
+    const { start, end } = this.selectionRange();
+    const buffer = this.active.term.buffer.active;
+    let text = '';
+    for (let row = start.row; row <= end.row; row++) {
+      const line = buffer.getLine(row);
+      if (!line) break;
+      const continues = row < end.row && buffer.getLine(row + 1)?.isWrapped;
+      if (row > start.row && !line.isWrapped) text += '\n';
+      const from = row === start.row ? start.col : 0;
+      const to = row === end.row ? end.col + 1 : line.length;
+      text += line.translateToString(!continues, from, to);
+    }
+    return text;
+  }
+
+  // OSC 52 asks the terminal to set the clipboard; the system tool covers
+  // terminals that don't.
+  copy(text) {
+    process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x07`);
+    if (!CLIPBOARD) return;
+    try {
+      const child = spawn(CLIPBOARD[0], CLIPBOARD.slice(1), { stdio: ['pipe', 'ignore', 'ignore'] });
+      child.on('error', () => {}); // not installed
+      child.stdin.on('error', () => {});
+      child.stdin.end(text);
+    } catch {
+      // can't spawn
+    }
   }
 
   sidebarInput(key) {
@@ -713,8 +811,16 @@ export class App {
     const session = this.active;
     if (!session) return this.welcomeLines(rows, cols);
 
+    const range = this.selectionRange();
+    const top = session.term.buffer.active.baseY - session.scrollOffset;
     const lines = [];
-    for (let y = 0; y < rows; y++) lines.push(renderRow(session.term, y, cols, session.scrollOffset));
+    for (let y = 0; y < rows; y++) {
+      const row = top + y;
+      const selected = range && row >= range.start.row && row <= range.end.row
+        ? { from: row === range.start.row ? range.start.col : 0, to: row === range.end.row ? range.end.col + 1 : cols }
+        : null;
+      lines.push(renderRow(session.term, y, cols, session.scrollOffset, selected));
+    }
 
     const banner = (y, text, codes) => (lines[y] = sgr(codes, fit(text, cols)));
     if (session.scrollOffset) {

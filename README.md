@@ -91,10 +91,15 @@ closed and mas lists the open sessions.
 | sidebar | click `×`              | kill that session (asks first)        |
 | sidebar | `q`                    | quit (asks first if anything runs)    |
 | session | mouse wheel, `Shift+PgUp/PgDn` | scroll back through output   |
+| session | drag                   | select and copy text                  |
 | anywhere| click                  | focus the pane, or pick a session in the sidebar |
 
-mas uses the mouse itself, so to select text with it, hold Shift while you drag
-(Option in iTerm2 and Terminal on macOS).
+To copy text, drag over it in the pane: mas highlights it and copies it when you
+let go, without the sidebar, and joins lines the program wrapped back together.
+It sets the clipboard through your terminal (OSC 52) and through `pbcopy` on
+macOS (`wl-copy` or `xclip` on Linux). A program that uses the mouse itself
+gets the drag instead; there, hold Shift (Option in iTerm2 and Terminal on
+macOS) to use your terminal's own selection.
 
 ### One window for everything
 

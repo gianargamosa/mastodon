@@ -44,6 +44,7 @@ Keys
            r        restart session     x        kill session (then 1-9 to pick another)
            q        quit                click ×  kill that session
   session  mouse wheel, Shift+PgUp / Shift+PgDn   scroll back through output
+           drag                                   select and copy text
 
 Config (optional, merged in order)
   ${CONFIG_PATHS.join('\n  ')}

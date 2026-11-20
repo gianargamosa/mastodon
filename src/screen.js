@@ -26,9 +26,10 @@ function attributes(cell) {
 }
 
 // Row `y` of the visible screen, `scrollOffset` lines up from the bottom,
-// clipped to `cols` cells. The result always ends with attributes reset and
+// clipped to `cols` cells, with columns `selected.from` to `selected.to`
+// (exclusive) shown inverted. The result always ends with attributes reset and
 // the rest of the line erased, which also stands in for trailing blanks.
-export function renderRow(term, y, cols, scrollOffset = 0) {
+export function renderRow(term, y, cols, scrollOffset = 0, selected = null) {
   const buffer = term.buffer.active;
   const line = buffer.getLine(buffer.baseY - scrollOffset + y);
   let out = '';
@@ -44,7 +45,8 @@ export function renderRow(term, y, cols, scrollOffset = 0) {
       const w = cell.getWidth();
       if (w === 0) continue; // second half of a wide character
       if (used + w > cols) break;
-      const attrs = attributes(cell);
+      const inverted = selected && x >= selected.from && x < selected.to;
+      const attrs = attributes(cell) + (inverted ? ';7' : '');
       if (attrs !== current) {
         out += `\x1b[0${attrs}m`;
         current = attrs;
