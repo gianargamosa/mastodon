@@ -1,0 +1,21 @@
+{
+  "name": "multiple-agent-session",
+  "version": "0.1.0",
+  "description": "Run several coding-agent sessions (Claude Code, Codex, Gemini, shells) side by side in one terminal, with a sidebar to switch between them.",
+  "type": "module",
+  "bin": {
+    "mas": "bin/mas.js"
+  },
+  "scripts": {
+    "start": "node bin/mas.js",
+    "postinstall": "node scripts/fix-pty-permissions.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0"
+  }
+}
